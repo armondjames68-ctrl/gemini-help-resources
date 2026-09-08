@@ -1,12 +1,11 @@
 const express = require('express');
+const authController = require('../controllers/authController');
+const { authenticate } = require('../../middleware/auth');
+
 const router = express.Router();
 
-router.post('/register', (req, res) => {
-  res.status(501).json({ message: 'User registration - Not implemented yet' });
-});
-
-router.post('/login', (req, res) => {
-  res.status(501).json({ message: 'User login - Not implemented yet' });
-});
+router.post('/register', authController.register);
+router.post('/login', authController.login);
+router.get('/profile', authenticate, authController.getProfile);
 
 module.exports = router;
