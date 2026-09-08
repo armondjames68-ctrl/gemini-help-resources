@@ -1,1 +1,90 @@
-const Conversation = require('../../models/Conversation');\nconst geminiService = require('../../services/geminiService');\nconst resourceService = require('../../services/resourceService');\n\nexports.sendMessage = async (req, res) => {\n  try {\n    const { message, conversationId } = req.body;\n    const userId = req.userId;\n\n    if (!message || message.trim().length === 0) {\n      return res.status(400).json({ error: 'Message cannot be empty' });\n    }\n\n    const isCrisis = await geminiService.checkForCrisis(message);\n    if (isCrisis) {\n      return res.json({\n        message: 'I notice you might be in crisis. Please reach out to a crisis counselor.',\n        crisisResources: {\n          phone: '988 (Suicide & Crisis Lifeline)',\n          text: 'Text HOME to 741741',\n          chat: 'https://suicidepreventionlifeline.org/chat'\n        }\n      });\n    }\n\n    let conversation;\n    if (conversationId) {\n      conversation = await Conversation.findById(conversationId);\n    } else {\n      conversation = new Conversation({ userId, title: message.substring(0, 50) });\n    }\n\n    const categories = await geminiService.extractResourceCategories(message);\n\n    const aiResponse = await geminiService.generateResponse(\n      message,\n      conversation.messages,\n      { userCategory: req.user?.category, location: req.user?.profile?.city }\n    );\n\n    let resources = [];\n    if (categories.length > 0) {\n      resources = await resourceService.recommendResources(\n        categories,\n        req.user?.profile ? {\n          coordinates: [req.user.profile.longitude, req.user.profile.latitude]\n        } : null\n      );\n    }\n\n    conversation.messages.push(\n      {\n        role: 'user',\n        content: message\n      },\n      {\n        role: 'assistant',\n        content: aiResponse.message,\n        resources: resources.map(r => ({\n          resourceId: r._id,\n          title: r.title,\n          category: r.category,\n          match_score: 1.0\n        }))\n      }\n    );\n\n    conversation.metadata.category = categories[0] || null;\n    conversation.metadata.needs = categories;\n    await conversation.save();\n\n    res.json({\n      conversationId: conversation._id,\n      message: aiResponse.message,\n      resources,\n      timestamp: new Date()\n    });\n  } catch (error) {\n    console.error('Chat error:', error);\n    res.status(500).json({ error: 'Failed to send message' });\n  }\n};\n\nexports.getHistory = async (req, res) => {\n  try {\n    const { userId } = req.params;\n    const conversations = await Conversation.find({ userId }).sort({ updatedAt: -1 });\n    res.json(conversations);\n  } catch (error) {\n    console.error('Get history error:', error);\n    res.status(500).json({ error: 'Failed to get conversation history' });\n  }\n};\n\nexports.deleteConversation = async (req, res) => {\n  try {\n    const { conversationId } = req.params;\n    await Conversation.findByIdAndDelete(conversationId);\n    res.json({ message: 'Conversation deleted' });\n  } catch (error) {\n    console.error('Delete conversation error:', error);\n    res.status(500).json({ error: 'Failed to delete conversation' });\n  }\n};\n
+const Conversation = require('../../models/Conversation');
+const geminiService = require('../../services/geminiService');
+const resourceService = require('../../services/resourceService');
+
+exports.sendMessage = async (req, res) => {
+  try {
+    const { message, conversationId } = req.body;
+    const userId = req.userId;
+
+    if (!message || message.trim().length === 0) {
+      return res.status(400).json({ error: 'Message cannot be empty' });
+    }
+
+    const isCrisis = await geminiService.checkForCrisis(message);
+    if (isCrisis) {
+      return res.json({
+        message: 'I notice you might be in crisis. Please reach out to a crisis counselor.',
+        crisisResources: {
+          phone: '988 (Suicide & Crisis Lifeline)',
+          text: 'Text HOME to 741741',
+          chat: 'https://suicidepreventionlifeline.org/chat'
+        }
+      });
+    }
+
+    let conversation;
+    if (conversationId) {
+      conversation = await Conversation.findById(conversationId);
+    } else {
+      conversation = new Conversation({ userId, title: message.substring(0, 50) });
+    }
+
+    const categories = await geminiService.extractResourceCategories(message);
+    const aiResponse = await geminiService.generateResponse(
+      message,
+      conversation.messages,
+      { userCategory: 'youth', location: 'general' }
+    );
+
+    let resources = [];
+    if (categories.length > 0) {
+      resources = await resourceService.recommendResources(categories);
+    }
+
+    conversation.messages.push(
+      { role: 'user', content: message },
+      {
+        role: 'assistant',
+        content: aiResponse.message,
+        resources: resources.map(r => ({
+          resourceId: r._id,
+          title: r.title,
+          category: r.category,
+          match_score: 1.0
+        }))
+      }
+    );
+
+    conversation.metadata.category = categories[0] || null;
+    conversation.metadata.needs = categories;
+    await conversation.save();
+
+    res.json({ conversationId: conversation._id, message: aiResponse.message, resources });
+  } catch (error) {
+    console.error('Chat error:', error);
+    res.status(500).json({ error: 'Failed to send message' });
+  }
+};
+
+exports.getHistory = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const conversations = await Conversation.find({ userId }).sort({ updatedAt: -1 });
+    res.json(conversations);
+  } catch (error) {
+    console.error('Get history error:', error);
+    res.status(500).json({ error: 'Failed to get conversation history' });
+  }
+};
+
+exports.deleteConversation = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    await Conversation.findByIdAndDelete(conversationId);
+    res.json({ message: 'Conversation deleted' });
+  } catch (error) {
+    console.error('Delete error:', error);
+    res.status(500).json({ error: 'Failed to delete conversation' });
+  }
+};
